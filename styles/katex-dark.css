@@ -1,0 +1,65 @@
+/**
+ * Dark-mode overrides for KaTeX rendering.
+ *
+ * Uses CSS custom properties so consumers can fine-tune colours.
+ * Activates under `data-theme="dark"` (Starlight convention) and
+ * `prefers-color-scheme: dark` (system preference fallback).
+ */
+
+:root {
+  --sl-katex-color: inherit;
+  --sl-katex-display-bg: transparent;
+  --sl-katex-display-border: none;
+}
+
+[data-theme="dark"] {
+  --sl-katex-color: #e0e0e0;
+  --sl-katex-display-bg: rgba(255, 255, 255, 0.04);
+  --sl-katex-display-border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sl-katex-color: #e0e0e0;
+    --sl-katex-display-bg: rgba(255, 255, 255, 0.04);
+    --sl-katex-display-border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+[data-theme="dark"] .katex,
+:root:not([data-theme="light"]) .katex {
+  color: var(--sl-katex-color);
+}
+
+[data-theme="dark"] .katex .mord,
+[data-theme="dark"] .katex .mbin,
+[data-theme="dark"] .katex .mrel,
+[data-theme="dark"] .katex .mop,
+[data-theme="dark"] .katex .mopen,
+[data-theme="dark"] .katex .mclose,
+[data-theme="dark"] .katex .mpunct,
+[data-theme="dark"] .katex .minner,
+:root:not([data-theme="light"]) .katex .mord,
+:root:not([data-theme="light"]) .katex .mbin,
+:root:not([data-theme="light"]) .katex .mrel,
+:root:not([data-theme="light"]) .katex .mop,
+:root:not([data-theme="light"]) .katex .mopen,
+:root:not([data-theme="light"]) .katex .mclose,
+:root:not([data-theme="light"]) .katex .mpunct,
+:root:not([data-theme="light"]) .katex .minner {
+  color: var(--sl-katex-color);
+}
+
+[data-theme="dark"] .katex-display,
+:root:not([data-theme="light"]) .katex-display {
+  background: var(--sl-katex-display-bg);
+  border-top: var(--sl-katex-display-border);
+  border-bottom: var(--sl-katex-display-border);
+  padding: 0.75em 0;
+  margin: 1em 0;
+}
+
+[data-theme="dark"] .katex-display > .katex,
+:root:not([data-theme="light"]) .katex-display > .katex {
+  color: var(--sl-katex-color);
+}
