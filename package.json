@@ -1,7 +1,17 @@
 {
-  "name": "starlight-katex",
+  "name": "@wyatt/starlight-katex",
   "version": "0.1.0",
   "description": "Starlight plugin for KaTeX math rendering with MDX compatibility",
+  "author": "WyattAu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WyattAu/starlight-katex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/WyattAu/starlight-katex/issues"
+  },
+  "homepage": "https://github.com/WyattAu/starlight-katex#readme",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
