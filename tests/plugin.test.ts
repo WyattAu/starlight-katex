@@ -1,6 +1,45 @@
 import { describe, it, expect } from 'vitest';
 import { starlightKatex } from '../src/index.js';
 
+interface HookArgs {
+  config: {
+    markdown?: {
+      remarkPlugins?: unknown[];
+      rehypePlugins?: unknown[];
+    };
+  };
+  updateConfig: (patch: Record<string, unknown>) => void;
+  injectScript: (stage: string, content: string) => void;
+}
+
+/** Drive the plugin through Starlight's setup hook and the added Astro integration. */
+function runPlugin(
+  options: Parameters<typeof starlightKatex>[0] = {},
+  userConfig: HookArgs['config'] = {},
+): { integrations: unknown[]; updates: Record<string, unknown>[]; injections: Array<{ stage: string; content: string }> } {
+  const plugin = starlightKatex(options);
+  const integrations: unknown[] = [];
+
+  plugin.hooks.setup({
+    addIntegration: (integration) => { integrations.push(integration); },
+  });
+
+  const updates: Record<string, unknown>[] = [];
+  const injections: Array<{ stage: string; content: string }> = [];
+
+  for (const integration of integrations) {
+    const hooks = (integration as unknown as Record<string, unknown>).hooks as Record<string, unknown>;
+    const configSetup = hooks['astro:config:setup'] as (args: HookArgs) => void;
+    configSetup({
+      config: userConfig,
+      updateConfig: (patch) => { updates.push(patch); },
+      injectScript: (stage, content) => { injections.push({ stage, content }); },
+    });
+  }
+
+  return { integrations, updates, injections };
+}
+
 describe('starlightKatex plugin', () => {
   it('returns a plugin object with name "starlight-katex"', () => {
     const plugin = starlightKatex();
@@ -12,15 +51,20 @@ describe('starlightKatex plugin', () => {
     expect(typeof plugin.hooks.setup).toBe('function');
   });
 
-  it('calls updateConfig with remark and rehype plugins', () => {
-    const plugin = starlightKatex();
-    const updates: Record<string, unknown>[] = [];
+  it('adds one Astro integration during setup', () => {
+    const { integrations } = runPlugin();
+    expect(integrations.length).toBe(1);
+    expect((integrations[0] as { name: string }).name).toBe('starlight-katex-inject');
+  });
 
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: (patch) => { updates.push(patch as Record<string, unknown>); },
-      addIntegration: () => {},
-    });
+  it('integration has astro:config:setup hook', () => {
+    const { integrations } = runPlugin();
+    const hooks = (integrations[0] as unknown as Record<string, unknown>).hooks as Record<string, unknown>;
+    expect(typeof hooks['astro:config:setup']).toBe('function');
+  });
+
+  it('calls updateConfig with remark and rehype plugins', () => {
+    const { updates } = runPlugin();
 
     expect(updates.length).toBeGreaterThanOrEqual(1);
 
@@ -36,30 +80,32 @@ describe('starlightKatex plugin', () => {
     expect(rehypePlugins.length).toBe(1);
   });
 
-  it('calls addIntegration for CSS injection', () => {
-    const plugin = starlightKatex();
-    const integrations: unknown[] = [];
-
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: () => {},
-      addIntegration: (integration) => { integrations.push(integration); },
+  it('preserves user-configured remark and rehype plugins', () => {
+    const userRemark = function userRemark() {};
+    const userRehype = function userRehype() {};
+    const { updates } = runPlugin({}, {
+      markdown: {
+        remarkPlugins: [userRemark],
+        rehypePlugins: [userRehype],
+      },
     });
 
-    expect(integrations.length).toBe(1);
-    const integration = integrations[0] as { name: string };
-    expect(integration.name).toBe('starlight-katex-inject');
+    const mdConfig = updates[0].markdown as Record<string, unknown>;
+    const remarkPlugins = mdConfig.remarkPlugins as unknown[];
+    const rehypePlugins = mdConfig.rehypePlugins as unknown[];
+
+    expect(remarkPlugins.length).toBe(3);
+    expect(remarkPlugins[0]).toBe(userRemark);
+    // math + brace escaping run after user plugins
+    expect(remarkPlugins[remarkPlugins.length - 2]).toEqual([expect.any(Function)]);
+    expect(remarkPlugins[remarkPlugins.length - 1]).toEqual([expect.any(Function)]);
+
+    expect(rehypePlugins.length).toBe(2);
+    expect(rehypePlugins[0]).toBe(userRehype);
   });
 
   it('passes katexOptions to rehype-katex', () => {
-    const plugin = starlightKatex({ katexOptions: { strict: false } });
-    const updates: Record<string, unknown>[] = [];
-
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: (patch) => { updates.push(patch as Record<string, unknown>); },
-      addIntegration: () => {},
-    });
+    const { updates } = runPlugin({ katexOptions: { strict: false } });
 
     const mdConfig = updates[0].markdown as Record<string, unknown>;
     const rehypePlugins = mdConfig.rehypePlugins as unknown[][];
@@ -67,81 +113,45 @@ describe('starlightKatex plugin', () => {
   });
 
   it('uses default options when none provided', () => {
-    const plugin = starlightKatex();
-    const updates: Record<string, unknown>[] = [];
-
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: (patch) => { updates.push(patch as Record<string, unknown>); },
-      addIntegration: () => {},
-    });
+    const { updates } = runPlugin();
 
     const mdConfig = updates[0].markdown as Record<string, unknown>;
     const rehypePlugins = mdConfig.rehypePlugins as unknown[][];
     expect(rehypePlugins[0][1]).toEqual({});
   });
 
-  it('integration has astro:config:setup hook', () => {
-    const plugin = starlightKatex();
-    const integrations: unknown[] = [];
+  it('integration injects head-inline scripts', () => {
+    const { injections } = runPlugin();
 
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: () => {},
-      addIntegration: (integration) => { integrations.push(integration); },
-    });
-
-    const integration = integrations[0] as Record<string, unknown>;
-    const hooks = integration.hooks as Record<string, unknown>;
-    expect(typeof hooks['astro:config:setup']).toBe('function');
+    expect(injections.length).toBe(2);
+    for (const { stage, content } of injections) {
+      expect(stage).toBe('head-inline');
+      expect(content).toContain('katex');
+      expect(content).toContain('astro:after-swap');
+    }
   });
 
-  it('integration injects head-inline script', () => {
-    const plugin = starlightKatex();
-    let injectedStage = '';
-    let injectedContent = '';
+  it('injects dark-mode overrides by default', () => {
+    const { injections } = runPlugin();
 
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: () => {},
-      addIntegration: (integration) => {
-        const hooks = (integration as unknown as Record<string, unknown>).hooks as Record<string, unknown>;
-        const setup = hooks['astro:config:setup'] as (args: {
-          injectScript: (stage: string, content: string) => void;
-        }) => void;
-        setup({
-          injectScript: (stage, content) => {
-            injectedStage = stage;
-            injectedContent = content;
-          },
-        });
-      },
-    });
+    const dark = injections.find(({ content }) => content.includes('sl-katex-dark'));
+    expect(dark).toBeTruthy();
+    expect(dark!.content).toContain('--sl-katex-color');
+    expect(dark!.content).toContain('data-theme');
+  });
 
-    expect(injectedStage).toBe('head-inline');
-    expect(injectedContent).toContain('katex');
-    expect(injectedContent).toContain('astro:after-swap');
+  it('skips dark-mode injection when darkMode is false', () => {
+    const { injections } = runPlugin({ darkMode: false });
+
+    expect(injections.length).toBe(1);
+    expect(injections[0].content).not.toContain('sl-katex-dark');
   });
 
   it('uses custom cssUrl in generated script', () => {
-    const plugin = starlightKatex({ cssUrl: 'https://custom.cdn/katex.css' });
-    let injectedContent = '';
+    const { injections } = runPlugin({ cssUrl: 'https://custom.cdn/katex.css' });
 
-    plugin.hooks.setup({
-      config: {},
-      updateConfig: () => {},
-      addIntegration: (integration) => {
-        const hooks = (integration as unknown as Record<string, unknown>).hooks as Record<string, unknown>;
-        const setup = hooks['astro:config:setup'] as (args: {
-          injectScript: (stage: string, content: string) => void;
-        }) => void;
-        setup({
-          injectScript: (_stage, content) => { injectedContent = content; },
-        });
-      },
-    });
-
-    expect(injectedContent).toContain('https://custom.cdn/katex.css');
+    expect(injections.some(({ content }) => content.includes('https://custom.cdn/katex.css'))).toBe(true);
+    expect(injections.some(({ content }) => content.includes('katex@0.16.44'))).toBe(false);
   });
 });
 
@@ -158,6 +168,16 @@ describe('exports', () => {
   it('re-exports generateKatexCSSLoader', async () => {
     const mod = await import('../src/index.js');
     expect(typeof mod.generateKatexCSSLoader).toBe('function');
+  });
+
+  it('re-exports generateDarkModeStyleInjection', async () => {
+    const mod = await import('../src/index.js');
+    expect(typeof mod.generateDarkModeStyleInjection).toBe('function');
+  });
+
+  it('re-exports DARK_MODE_STYLE_ID', async () => {
+    const mod = await import('../src/index.js');
+    expect(typeof mod.DARK_MODE_STYLE_ID).toBe('string');
   });
 
   it('re-exports LATEX_ENV_NAMES', async () => {

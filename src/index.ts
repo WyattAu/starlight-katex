@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import type { AstroIntegration } from 'astro';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { remarkEscapeBraces } from './remark-escape-braces.js';
-import { generateKatexCSSLoader } from './katex-css-loader.js';
+import { generateKatexCSSLoader, generateDarkModeStyleInjection } from './katex-css-loader.js';
 
 /**
  * Options for the `starlight-katex` plugin.
@@ -8,7 +11,7 @@ import { generateKatexCSSLoader } from './katex-css-loader.js';
 export interface StarlightKatexOptions {
   /**
    * Additional options passed directly to `rehype-katex`.
-   * See https://github.com/remarkjs/rehype-kathex#options
+   * See https://github.com/remarkjs/rehype-katex#options
    */
   katexOptions?: Record<string, unknown>;
   /**
@@ -23,6 +26,12 @@ export interface StarlightKatexOptions {
   darkMode?: boolean;
 }
 
+/** Load the bundled dark-mode stylesheet from `styles/katex-dark.css`. */
+function loadDarkModeCSS(): string {
+  const cssUrl = new URL('../styles/katex-dark.css', import.meta.url);
+  return readFileSync(cssUrl, 'utf-8');
+}
+
 /**
  * Starlight plugin that adds KaTeX math rendering with MDX compatibility.
  *
@@ -31,7 +40,7 @@ export interface StarlightKatexOptions {
  * ```js
  * import { defineConfig } from 'astro/config';
  * import starlight from '@astrojs/starlight';
- * import starlightKatex from 'starlight-katex';
+ * import { starlightKatex } from '@wyatt/starlight-katex';
  *
  * export default defineConfig({
  *   integrations: [
@@ -48,8 +57,6 @@ export function starlightKatex(
   name: string;
   hooks: {
     setup: (config: {
-      config: Record<string, unknown>;
-      updateConfig: (patch: Record<string, unknown>) => void;
       addIntegration: (integration: AstroIntegration) => void;
     }) => void;
   };
@@ -59,25 +66,49 @@ export function starlightKatex(
   return {
     name: 'starlight-katex',
     hooks: {
-      setup({ updateConfig, addIntegration }) {
-        const loaderScript = generateKatexCSSLoader(cssUrl);
+      setup({ addIntegration }) {
+        const injectedScripts = [generateKatexCSSLoader(cssUrl)];
 
-        updateConfig({
-          markdown: {
-            remarkPlugins: [['remark-math'], [remarkEscapeBraces]],
-            rehypePlugins: [['rehype-katex', katexOptions ?? {}]],
-          },
-        });
+        if (darkMode) {
+          injectedScripts.push(generateDarkModeStyleInjection(loadDarkModeCSS()));
+        }
 
         addIntegration({
           name: 'starlight-katex-inject',
           hooks: {
             'astro:config:setup'({
+              config,
+              updateConfig,
               injectScript,
             }: {
+              config: {
+                markdown?: {
+                  remarkPlugins?: unknown[];
+                  rehypePlugins?: unknown[];
+                };
+              };
+              updateConfig: (patch: Record<string, unknown>) => void;
               injectScript: (stage: string, content: string) => void;
             }) {
-              injectScript('head-inline', loaderScript);
+              // Preserve any remark/rehype plugins the user configured,
+              // then append math rendering and brace escaping after them.
+              const remarkPlugins = [
+                ...(config.markdown?.remarkPlugins ?? []),
+                [remarkMath],
+                [remarkEscapeBraces],
+              ];
+              const rehypePlugins = [
+                ...(config.markdown?.rehypePlugins ?? []),
+                [rehypeKatex, katexOptions ?? {}],
+              ];
+
+              updateConfig({
+                markdown: { remarkPlugins, rehypePlugins },
+              });
+
+              for (const script of injectedScripts) {
+                injectScript('head-inline', script);
+              }
             },
           },
         } as AstroIntegration);
@@ -87,5 +118,9 @@ export function starlightKatex(
 }
 
 export { remarkEscapeBraces } from './remark-escape-braces.js';
-export { generateKatexCSSLoader } from './katex-css-loader.js';
+export {
+  generateKatexCSSLoader,
+  generateDarkModeStyleInjection,
+  DARK_MODE_STYLE_ID,
+} from './katex-css-loader.js';
 export { LATEX_ENV_NAMES, restorePlaceholders, escapeLiteralBraces } from './utils.js';
